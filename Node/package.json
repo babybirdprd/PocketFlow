@@ -1,0 +1,48 @@
+{
+  "name": "pocketflowjs",
+  "version": "1.0.0",
+  "description": "Node.js implementation of PocketFlow - A framework for building LLM applications",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "prepare": "npm run build",
+    "docs": "typedoc --out docs src"
+  },
+  "keywords": [
+    "llm",
+    "ai",
+    "flow",
+    "agent",
+    "rag",
+    "workflow",
+    "typescript",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/pocketflowjs.git"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typedoc": "^0.25.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.0.0",
+    "js-yaml": "^4.1.0",
+    "openai": "^4.0.0"
+  }
+}

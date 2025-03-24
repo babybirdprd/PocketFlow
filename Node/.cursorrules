@@ -1,0 +1,555 @@
+---
+layout: default
+title: "Agentic Coding"
+---
+
+# Agentic Coding: Humans Design, Agents code!
+
+> If you are an AI agents involved in building LLM Systems, read this guide **VERY, VERY** carefully! This is the most important chapter in the entire document. Throughout development, you should always (1) start with a small and simple solution, (2) design at a high level (`docs/design.md`) before implementation, and (3) frequently ask humans for feedback and clarification.
+{: .warning }
+
+## Agentic Coding Steps
+
+Agentic Coding should be a collaboration between Human System Design and Agent Implementation:
+
+| Steps                  | Human      | AI        | Comment                                                                 |
+|:-----------------------|:----------:|:---------:|:------------------------------------------------------------------------|
+| 1. Requirements | ★★★ High  | ★☆☆ Low   | Humans understand the requirements and context.                    |
+| 2. Flow          | ★★☆ Medium | ★★☆ Medium |  Humans specify the high-level design, and the AI fills in the details. |
+| 3. Utilities   | ★★☆ Medium | ★★☆ Medium | Humans provide available external APIs and integrations, and the AI helps with implementation. |
+| 4. Node          | ★☆☆ Low   | ★★★ High  | The AI helps design the node types and data handling based on the flow.          |
+| 5. Implementation      | ★☆☆ Low   | ★★★ High  |  The AI implements the flow based on the design. |
+| 6. Optimization        | ★★☆ Medium | ★★☆ Medium | Humans evaluate the results, and the AI helps optimize. |
+| 7. Reliability         | ★☆☆ Low   | ★★★ High  |  The AI writes test cases and addresses corner cases.     |
+
+1. **Requirements**: Clarify the requirements for your project, and evaluate whether an AI system is a good fit. 
+    - Understand AI systems' strengths and limitations:
+      - **Good for**: Routine tasks requiring common sense (filling forms, replying to emails)
+      - **Good for**: Creative tasks with well-defined inputs (building slides, writing SQL)
+      - **Not good for**: Ambiguous problems requiring complex decision-making (business strategy, startup planning)
+      - **Not good for**: Tasks requiring specialized knowledge (medical diagnosis, legal advice)
+    - **Keep It User-Centric:** Explain the "problem" from the user's perspective rather than just listing features.
+    - **Balance complexity vs. impact**: Aim to deliver the highest value features with minimal complexity early.
+
+2. **Flow Design**: Outline at a high level, describe how your AI system orchestrates nodes.
+    - Identify applicable design patterns (e.g., [Map Reduce](./design_pattern/mapreduce.md), [Agent](./design_pattern/agent.md), [RAG](./design_pattern/rag.md)).
+      - For each node in the flow, start with a high-level one-line description of what it does.
+      - If using **Map Reduce**, specify how to map (what to split) and how to reduce (how to combine).
+      - If using **Agent**, specify what are the inputs (context) and what are the possible actions.
+      - If using **RAG**, specify what to embed, noting that there's usually both offline (indexing) and online (retrieval) workflows.
+    - Outline the flow and draw it in a mermaid diagram. For example:
+      ```mermaid
+      flowchart LR
+          start[Start] --> batch[Batch]
+          batch --> check[Check]
+          check -->|OK| process
+          check -->|Error| fix[Fix]
+          fix --> check
+          
+          subgraph process[Process]
+            step1[Step 1] --> step2[Step 2]
+          end
+          
+          process --> endNode[End]
+      ```
+    - > **If Humans can't specify the flow, AI Agents can't automate it!** Before building an LLM system, thoroughly understand the problem and potential solution by manually solving example inputs to develop intuition.  
+      {: .best-practice }
+
+3. **Utilities**: Based on the Flow Design, identify and implement necessary utility functions.
+    - Think of your AI system as the brain. It needs a body—these *external utility functions*—to interact with the real world:
+        <div align="center"><img src="https://github.com/the-pocket/PocketFlow/raw/main/assets/utility.png?raw=true" width="400"/></div>
+        - Reading inputs (e.g., retrieving Slack messages, reading emails)
+        - Writing outputs (e.g., generating reports, sending emails)
+        - Using external tools (e.g., calling LLMs, searching the web)
+        - **NOTE**: *LLM-based tasks* (e.g., summarizing text, analyzing sentiment) are **NOT** utility functions; rather, they are *core functions* internal in the AI system.
+    - For each utility function, implement it and write a simple test.
+    - Document their input/output, as well as why they are necessary. For example:
+      - `name`: `get_embedding` (`utils/get_embedding.py`)
+      - `input`: `str`
+      - `output`: a vector of 3072 floats
+      - `necessity`: Used by the second node to embed text
+    - Example utility implementation:
+      ```typescript
+      // utils/callLLM.ts
+      import { OpenAI } from 'openai';
+      
+      export async function callLLM(prompt: string): Promise<string> {
+          const client = new OpenAI({ apiKey: "YOUR_API_KEY_HERE" });
+          const response = await client.chat.completions.create({
+              model: "gpt-4o",
+              messages: [{ role: "user", content: prompt }]
+          });
+          return response.choices[0].message.content || '';
+      }
+          
+      if (require.main === module) {
+          (async () => {
+              const prompt = "What is the meaning of life?";
+              console.log(await callLLM(prompt));
+          })();
+      }
+      ```
+    - > **Sometimes, design Utilities before Flow:**  For example, for an LLM project to automate a legacy system, the bottleneck will likely be the available interface to that system. Start by designing the hardest utilities for interfacing, and then build the flow around them.
+      {: .best-practice }
+
+4. **Node Design**: Plan how each node will read and write data, and use utility functions.
+   - One core design principle for PocketFlowJS is to use a shared store, so start with a shared store design:
+      - For simple systems, use an in-memory dictionary.
+      - For more complex systems or when persistence is required, use a database.
+      - **Don't Repeat Yourself**: Use in-memory references or foreign keys.
+      - Example shared store design:
+        ```typescript
+        const shared = {
+            "user": {
+                "id": "user123",
+                "name": "John Doe",
+                "email": "john@example.com"
+            },
+            "query": "How do I reset my password?",
+            "context": [],
+            "response": ""
+        };
+        ```
+   - For each node, specify:
+      - What it reads from the shared store
+      - What it writes to the shared store
+      - What utility functions it uses
+      - What it returns (action)
+   - Example node design:
+      ```typescript
+      class RetrieveContext extends Node {
+          prep(shared: Record<string, any>): any {
+              return shared.query;
+          }
+          
+          async exec(query: string): Promise<string[]> {
+              const embedding = await getEmbedding(query);
+              const results = await vectorSearch(embedding);
+              return results;
+          }
+          
+          post(shared: Record<string, any>, prepRes: any, execRes: string[]): string | null {
+              shared.context = execRes;
+              return "default";
+          }
+      }
+      ```
+
+5. **Implementation**: Implement the flow based on the design.
+   - Implement each node according to the design.
+   - Connect the nodes according to the flow.
+   - Test the implementation with sample inputs.
+   - Debug and fix any issues.
+   - Example flow implementation:
+      ```typescript
+      // Create nodes
+      const retrieveContext = new RetrieveContext();
+      const generateResponse = new GenerateResponse();
+      
+      // Connect nodes
+      retrieveContext.addSuccessor(generateResponse);
+      
+      // Create flow
+      const flow = new Flow(retrieveContext);
+      
+      // Run flow
+      const shared = {
+          "query": "How do I reset my password?",
+          "context": [],
+          "response": ""
+      };
+      flow.run(shared);
+      console.log(shared.response);
+      ```
+
+6. **Optimization**: Evaluate and optimize the results.
+   - Evaluate the system against the success criteria.
+   - Identify areas for improvement.
+   - Optimize the system for performance, reliability, and accuracy.
+   - Consider scaling and deployment requirements.
+
+7. **Reliability**: Write test cases and address corner cases.
+   - Write unit tests for each component.
+   - Write integration tests for the system as a whole.
+   - Identify and address corner cases and edge cases.
+   - Ensure the system is robust and reliable.
+
+# PocketFlowJS Core Abstractions
+
+## Node
+
+A **Node** is the fundamental building block in PocketFlowJS. It processes data in three steps:
+
+1. **prep**: Prepares data from the shared context
+2. **exec**: Executes the main logic
+3. **post**: Processes results and updates the shared context
+
+### Basic Node
+
+```typescript
+import { Node } from 'pocketflowjs';
+
+class GreetingNode extends Node {
+  prep(shared: Record<string, any>): any {
+    return shared.name;
+  }
+  
+  exec(name: string): string {
+    return `Hello, ${name}!`;
+  }
+  
+  post(shared: Record<string, any>, prepRes: any, execRes: string): string | null {
+    shared.greeting = execRes;
+    return "default";
+  }
+}
+```
+
+## Flow
+
+A **Flow** connects nodes and manages execution:
+
+```typescript
+import { Flow } from 'pocketflowjs';
+
+// Create nodes
+const greetingNode = new GreetingNode();
+const capitalizeNode = new CapitalizeNode();
+
+// Connect nodes
+greetingNode.addSuccessor(capitalizeNode);
+
+// Create flow
+const flow = new Flow(greetingNode);
+
+// Run flow
+const shared = { name: "World" };
+flow.run(shared);
+console.log(shared.greeting); // "HELLO, WORLD!"
+```
+
+## Batch Processing
+
+PocketFlowJS supports batch processing for handling multiple items:
+
+### BatchNode
+
+A **BatchNode** processes multiple items:
+
+```typescript
+import { BatchNode } from 'pocketflowjs';
+
+class ProcessNames extends BatchNode {
+  prepBatch(shared: Record<string, any>): string[] {
+    return shared.names;
+  }
+  
+  execBatch(name: string): string {
+    return `Hello, ${name}!`;
+  }
+  
+  postBatch(shared: Record<string, any>, prepRes: any, execResList: string[]): string | null {
+    shared.greetings = execResList;
+    return "default";
+  }
+}
+```
+
+### BatchFlow
+
+A **BatchFlow** runs a flow multiple times with different parameters:
+
+```typescript
+import { BatchFlow } from 'pocketflowjs';
+
+class ProcessAllFiles extends BatchFlow {
+  prepBatch(shared: Record<string, any>): Record<string, any>[] {
+    const filenames = shared.filenames;
+    return filenames.map(filename => ({ filename }));
+  }
+}
+
+// Create a flow for processing a single file
+const processFile = new ProcessFile();
+const flow = new Flow(processFile);
+
+// Create a batch flow for processing multiple files
+const batchFlow = new ProcessAllFiles(flow);
+
+// Run batch flow
+const shared = { filenames: ["file1.txt", "file2.txt", "file3.txt"] };
+batchFlow.run(shared);
+```
+
+## Asynchronous Processing
+
+PocketFlowJS supports asynchronous processing:
+
+### AsyncNode
+
+```typescript
+import { AsyncNode } from 'pocketflowjs';
+
+class AsyncGreetingNode extends AsyncNode {
+  async prepAsync(shared: Record<string, any>): Promise<any> {
+    return shared.name;
+  }
+  
+  async execAsync(name: string): Promise<string> {
+    // Simulate async operation
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return `Hello, ${name}!`;
+  }
+  
+  async postAsync(shared: Record<string, any>, prepRes: any, execRes: string): Promise<string | null> {
+    shared.greeting = execRes;
+    return "default";
+  }
+}
+```
+
+### AsyncFlow
+
+```typescript
+import { AsyncFlow } from 'pocketflowjs';
+
+// Create async nodes
+const asyncGreetingNode = new AsyncGreetingNode();
+const asyncCapitalizeNode = new AsyncCapitalizeNode();
+
+// Connect nodes
+asyncGreetingNode.addSuccessor(asyncCapitalizeNode);
+
+// Create async flow
+const asyncFlow = new AsyncFlow(asyncGreetingNode);
+
+// Run async flow
+const shared = { name: "World" };
+await asyncFlow.runAsync(shared);
+console.log(shared.greeting); // "HELLO, WORLD!"
+```
+
+## Communication
+
+Nodes and Flows communicate in two ways:
+
+1. **Shared Store**: A global data structure that all nodes can read and write
+2. **Params**: Local parameters passed to nodes by the parent Flow (used primarily in batch processing)
+
+### Shared Store Example
+
+```typescript
+const shared = {
+  user: {
+    id: "user123",
+    name: "John Doe"
+  },
+  query: "How do I reset my password?",
+  context: [],
+  response: ""
+};
+```
+
+### Params Example
+
+```typescript
+// In a BatchFlow
+prepBatch(shared: Record<string, any>): Record<string, any>[] {
+  return [
+    { filename: "file1.txt" },
+    { filename: "file2.txt" },
+    { filename: "file3.txt" }
+  ];
+}
+```
+
+# Design Patterns
+
+## RAG (Retrieval-Augmented Generation)
+
+RAG combines retrieval of relevant information with generative AI:
+
+```typescript
+// RAG Flow
+const retrieveContext = new RetrieveContext();
+const generateResponse = new GenerateResponse();
+
+retrieveContext.addSuccessor(generateResponse);
+
+const ragFlow = new Flow(retrieveContext);
+```
+
+## Map-Reduce
+
+Map-Reduce processes data in parallel and then combines results:
+
+```typescript
+// Map-Reduce Flow
+const mapNode = new MapDocuments();
+const reduceNode = new ReduceSummaries();
+
+mapNode.addSuccessor(reduceNode);
+
+const mapReduceFlow = new Flow(mapNode);
+```
+
+## Agent
+
+Agents make decisions and take actions:
+
+```typescript
+// Agent Flow
+const decideAction = new DecideAction();
+const searchWeb = new SearchWeb();
+const answerQuestion = new AnswerQuestion();
+
+decideAction.addSuccessor(searchWeb, "search");
+decideAction.addSuccessor(answerQuestion, "answer");
+searchWeb.addSuccessor(decideAction, "decide");
+
+const agentFlow = new Flow(decideAction);
+```
+
+## Multi-Agent
+
+Multiple agents working together:
+
+```typescript
+// Multi-Agent Flow
+const hinter = new AsyncHinter();
+const guesser = new AsyncGuesser();
+
+hinter.addSuccessor(hinter, "continue");
+guesser.addSuccessor(guesser, "continue");
+
+const hinterFlow = new AsyncFlow(hinter);
+const guesserFlow = new AsyncFlow(guesser);
+
+// Run both agents concurrently
+await Promise.all([
+  hinterFlow.runAsync(shared),
+  guesserFlow.runAsync(shared)
+]);
+```
+
+## Supervisor
+
+A supervisor monitors and controls other agents:
+
+```typescript
+// Supervisor Flow
+const agentFlow = createAgentInnerFlow();
+const supervisor = new SupervisorNode();
+
+agentFlow.addSuccessor(supervisor);
+supervisor.addSuccessor(agentFlow, "decide");
+
+const supervisedFlow = new Flow(agentFlow);
+```
+
+# Best Practices
+
+## General
+
+1. **Start Simple**: Begin with the simplest solution that meets your requirements
+2. **Design First**: Plan your flow before implementation
+3. **Test Thoroughly**: Write tests for each component and the system as a whole
+4. **Handle Errors**: Plan for error handling and edge cases
+5. **Optimize Iteratively**: Start with a working solution, then optimize
+
+## Node Design
+
+1. **Single Responsibility**: Each node should do one thing well
+2. **Clear Interfaces**: Define clear inputs and outputs for each node
+3. **Immutable Data**: Treat data as immutable when possible
+4. **Error Handling**: Handle errors gracefully within nodes
+5. **Logging**: Add appropriate logging for debugging
+
+## Flow Design
+
+1. **Clear Structure**: Design flows with a clear structure
+2. **Conditional Branching**: Use conditional branching sparingly
+3. **Avoid Cycles**: Be careful with cycles in flows
+4. **Composability**: Design flows to be composable
+5. **Testability**: Design flows to be testable
+
+## Batch Processing
+
+1. **Chunking**: Break large datasets into manageable chunks
+2. **Parallelization**: Use parallel processing when appropriate
+3. **Error Handling**: Handle errors in batch processing gracefully
+4. **Progress Tracking**: Track progress in long-running batch processes
+5. **Resource Management**: Manage resources carefully in batch processing
+
+## Asynchronous Processing
+
+1. **Promises**: Use promises for asynchronous operations
+2. **Async/Await**: Use async/await for cleaner asynchronous code
+3. **Concurrency Control**: Control concurrency in asynchronous operations
+4. **Error Handling**: Handle errors in asynchronous operations gracefully
+5. **Cancellation**: Support cancellation in long-running asynchronous operations
+
+# Cookbook Examples
+
+PocketFlowJS includes several cookbook examples demonstrating common LLM application patterns:
+
+1. **Workflow**: Article writing workflow with planning, drafting, and editing
+2. **Thinking**: Chain-of-thought reasoning for complex problem solving
+3. **RAG**: Retrieval-Augmented Generation for knowledge-based responses
+4. **Map-Reduce**: Processing and summarizing multiple documents
+5. **Agent**: Research agent with search and answer capabilities
+6. **Streaming**: LLM response streaming with user interruption
+7. **Multi-Agent**: Collaborative agents communicating asynchronously
+8. **Supervisor**: Quality control with supervisor monitoring agent outputs
+
+# Getting Started
+
+To use PocketFlowJS in your project:
+
+```bash
+npm install pocketflowjs
+```
+
+Basic usage:
+
+```typescript
+import { Node, Flow } from 'pocketflowjs';
+
+// Create a simple node
+class GreetingNode extends Node {
+  prep(shared: Record<string, any>): any {
+    return shared.name;
+  }
+  
+  exec(name: string): string {
+    return `Hello, ${name}!`;
+  }
+  
+  post(shared: Record<string, any>, prepRes: any, execRes: string): string | null {
+    shared.greeting = execRes;
+    return "default";
+  }
+}
+
+// Create and run a flow
+const node = new GreetingNode();
+const flow = new Flow(node);
+
+const shared = { name: "World" };
+flow.run(shared);
+console.log(shared.greeting); // "Hello, World!"
+```
+
+# Contributing
+
+Contributions to PocketFlowJS are welcome! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Write tests for your changes
+5. Submit a pull request
+
+# License
+
+PocketFlowJS is licensed under the MIT License.
